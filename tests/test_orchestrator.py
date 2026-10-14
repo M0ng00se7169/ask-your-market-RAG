@@ -186,7 +186,7 @@ class TestRefusalClassification:
 
 
 class TestSourceExtraction:
-    def test_price_changes_produces_sources(self):
+    def test_format_sources_price_changes(self):
         results = [
             {
                 "question_type": "price_changes",
@@ -207,7 +207,7 @@ class TestSourceExtraction:
                 ],
             },
         ]
-        sources = orchestrator._sources_from_tool_results(results)
+        sources = orchestrator.format_sources(results)
         assert len(sources) == 1
         assert sources[0]["url"] == "https://example.com/a"
         assert sources[0]["title"] == "A"
@@ -215,9 +215,11 @@ class TestSourceExtraction:
         assert sources[0]["price"] == 16.0
         assert sources[0]["currency"] == "GBP"
         assert sources[0]["in_stock"] is True
+        assert sources[0]["promo"] == ""
+        assert sources[0]["rating"] == 4.2
         assert sources[0]["value_label"] == "GBP 16; in stock; rating: 4.2"
 
-    def test_current_product_produces_sources(self):
+    def test_format_sources_current_product(self):
         results = [
             {
                 "question_type": "current_product",
@@ -236,13 +238,14 @@ class TestSourceExtraction:
                 ],
             },
         ]
-        sources = orchestrator._sources_from_tool_results(results)
+        sources = orchestrator.format_sources(results)
         assert len(sources) == 1
         assert sources[0]["url"] == "https://example.com/b"
         assert sources[0]["in_stock"] is False
         assert sources[0]["value_label"] == "EUR 9.5; out of stock"
+        assert sources[0]["rating"] is None
 
-    def test_out_of_stock_sources(self):
+    def test_format_sources_out_of_stock(self):
         results = [
             {
                 "question_type": "out_of_stock",
@@ -268,12 +271,12 @@ class TestSourceExtraction:
                 ],
             },
         ]
-        sources = orchestrator._sources_from_tool_results(results)
+        sources = orchestrator.format_sources(results)
         # deduped by url + scraped_at
         assert len(sources) == 2
         assert {s["url"] for s in sources} == {"https://example.com/c"}
 
-    def test_dedup_across_tool_results(self):
+    def test_format_sources_dedup_across_tool_results(self):
         results = [
             {
                 "question_type": "current_product",
@@ -306,26 +309,337 @@ class TestSourceExtraction:
                 ],
             },
         ]
-        sources = orchestrator._sources_from_tool_results(results)
+        sources = orchestrator.format_sources(results)
         # The same url+scraped_at appears twice; keep one source.
         assert len(sources) == 1
 
-    def test_empty_results_returns_no_sources(self):
-        sources = orchestrator._sources_from_tool_results([])
+    def test_format_sources_empty_results_returns_no_sources(self):
+        sources = orchestrator.format_sources([])
         assert sources == []
 
-    def test_unknown_question_type_is_ignored(self):
+    def test_format_sources_unknown_question_type_is_ignored(self):
         results = [
             {
                 "question_type": "bogus",
                 "result": [{"url": "https://example.com/x", "title": "X"}],
             },
         ]
-        sources = orchestrator._sources_from_tool_results(results)
+        sources = orchestrator.format_sources(results)
         # Unknown question_type is not a recognized source-bearing tool result,
         # so its rows are intentionally skipped (they lack a source shape we can
         # attribute reliably).
         assert sources == []
+
+    def test_format_sources_most_expensive(self):
+        results = [
+            {
+                "question_type": "most_expensive",
+                "n": 3,
+                "result": [
+                    {
+                        "url": "https://example.com/e",
+                        "title": "Expensive Book",
+                        "price": 49.99,
+                        "currency": "USD",
+                        "in_stock": True,
+                        "promo": "sale",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "rating": 4.8,
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        assert len(sources) == 1
+        assert sources[0]["url"] == "https://example.com/e"
+        assert sources[0]["price"] == 49.99
+        assert sources[0]["currency"] == "USD"
+        assert sources[0]["promo"] == "sale"
+        assert sources[0]["value_label"] == "USD 49.99; in stock; promo: sale; rating: 4.8"
+
+    def test_format_sources_least_expensive(self):
+        results = [
+            {
+                "question_type": "least_expensive",
+                "n": 3,
+                "result": [
+                    {
+                        "url": "https://example.com/f",
+                        "title": "Cheap Book",
+                        "price": 5.99,
+                        "currency": "USD",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "rating": 3.5,
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        assert len(sources) == 1
+        assert sources[0]["url"] == "https://example.com/f"
+        assert sources[0]["price"] == 5.99
+        assert sources[0]["value_label"] == "USD 5.99; in stock; rating: 3.5"
+
+    def test_format_sources_product_history(self):
+        results = [
+            {
+                "question_type": "product_history",
+                "url": "https://example.com/g",
+                "result": [
+                    {
+                        "url": "https://example.com/g",
+                        "title": "History Book",
+                        "price": 25.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-01T00:00:00",
+                        "rating": 4.0,
+                    },
+                    {
+                        "url": "https://example.com/g",
+                        "title": "History Book",
+                        "price": 22.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "rating": 4.2,
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        # Both snapshots are distinct by scraped_at, so both are kept
+        assert len(sources) == 2
+        assert sources[0]["scraped_at"] == "2026-10-01T00:00:00"
+        assert sources[0]["price"] == 25.0
+        assert sources[1]["scraped_at"] == "2026-10-04T00:00:00"
+        assert sources[1]["price"] == 22.0
+
+    def test_format_sources_mixed_tool_results(self):
+        """When both query_snapshots and search_descriptions are called, sources
+        from both are merged and de-duplicated."""
+        results = [
+            {
+                "question_type": "search_descriptions",
+                "result": [
+                    {
+                        "url": "https://example.com/h",
+                        "title": "Similar Book",
+                        "price": 15.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "score": 0.85,
+                    },
+                ],
+            },
+            {
+                "question_type": "current_product",
+                "url": "https://example.com/h",
+                "result": [
+                    {
+                        "url": "https://example.com/h",
+                        "title": "Similar Book",
+                        "price": 15.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        # De-duplicated by url + scraped_at
+        assert len(sources) == 1
+        assert sources[0]["url"] == "https://example.com/h"
+        assert sources[0]["score"] == 0.85
+
+    def test_format_sources_search_descriptions_direct(self):
+        """search_descriptions results are recognized when returned directly in result."""
+        results = [
+            {
+                "question_type": "search_descriptions",
+                "query": "cookbook",
+                "top_k": 5,
+                "result": [
+                    {
+                        "url": "https://example.com/i",
+                        "title": "Italian Cookbook",
+                        "price": 20.0,
+                        "currency": "EUR",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "score": 0.92,
+                    },
+                    {
+                        "url": "https://example.com/j",
+                        "title": "French Cookbook",
+                        "price": 25.0,
+                        "currency": "EUR",
+                        "in_stock": False,
+                        "promo": "",
+                        "scraped_at": "2026-10-03T00:00:00",
+                        "score": 0.88,
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        assert len(sources) == 2
+        assert sources[0]["url"] == "https://example.com/i"
+        assert sources[0]["score"] == 0.92
+        assert sources[0]["title"] == "Italian Cookbook"
+        assert sources[1]["url"] == "https://example.com/j"
+        assert sources[1]["score"] == 0.88
+        assert sources[1]["title"] == "French Cookbook"
+
+    def test_format_sources_include_score_flag(self):
+        results = [
+            {
+                "question_type": "search_descriptions",
+                "result": [
+                    {
+                        "url": "https://example.com/k",
+                        "title": "Test Book",
+                        "price": 10.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "score": 0.75,
+                    },
+                ],
+            },
+        ]
+        sources_no_score = orchestrator.format_sources(results, include_score=False)
+        assert "score" not in sources_no_score[0]
+
+        sources_with_score = orchestrator.format_sources(results, include_score=True)
+        assert sources_with_score[0]["score"] == 0.75
+
+    def test_format_sources_for_ui(self):
+        """format_sources_for_ui returns sources with value_label always included."""
+        results = [
+            {
+                "question_type": "current_product",
+                "url": "https://example.com/l",
+                "result": [
+                    {
+                        "url": "https://example.com/l",
+                        "title": "UI Test Book",
+                        "price": 12.99,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "new",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "rating": 4.5,
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources_for_ui(results)
+        assert len(sources) == 1
+        assert sources[0]["url"] == "https://example.com/l"
+        assert sources[0]["title"] == "UI Test Book"
+        assert sources[0]["value_label"] == "GBP 12.99; in stock; promo: new; rating: 4.5"
+        assert sources[0]["scraped_at"] == "2026-10-04T00:00:00"
+
+    def test_format_sources_preserves_order_of_first_appearance(self):
+        """Sources appear in the order their tool results were processed."""
+        results = [
+            {
+                "question_type": "most_expensive",
+                "n": 3,
+                "result": [
+                    {
+                        "url": "https://example.com/m",
+                        "title": "First",
+                        "price": 50.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                    },
+                ],
+            },
+            {
+                "question_type": "least_expensive",
+                "n": 3,
+                "result": [
+                    {
+                        "url": "https://example.com/n",
+                        "title": "Second",
+                        "price": 5.0,
+                        "currency": "GBP",
+                        "in_stock": True,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        assert len(sources) == 2
+        assert sources[0]["title"] == "First"
+        assert sources[1]["title"] == "Second"
+
+    def test_format_sources_result_is_serializable(self):
+        """The sources list can be JSON-serialized for the UI/eval."""
+        results = [
+            {
+                "question_type": "current_product",
+                "url": "https://example.com/o",
+                "result": [
+                    {
+                        "url": "https://example.com/o",
+                        "title": "Serializable Book",
+                        "price": 19.99,
+                        "currency": "USD",
+                        "in_stock": False,
+                        "promo": "",
+                        "scraped_at": "2026-10-04T00:00:00",
+                        "rating": 4.0,
+                    },
+                ],
+            },
+        ]
+        import json
+        sources = orchestrator.format_sources(results)
+        payload = json.loads(json.dumps(sources))
+        assert payload[0]["url"] == "https://example.com/o"
+        assert payload[0]["title"] == "Serializable Book"
+        assert payload[0]["value_label"] == "USD 19.99; out of stock; rating: 4"
+
+    def test_format_sources_missing_fields_default_to_empty(self):
+        """Rows missing optional fields still produce valid source entries."""
+        results = [
+            {
+                "question_type": "current_product",
+                "url": "https://example.com/p",
+                "result": [
+                    {
+                        "url": "https://example.com/p",
+                        # title, price, currency etc. all missing
+                        "scraped_at": "2026-10-04T00:00:00",
+                    },
+                ],
+            },
+        ]
+        sources = orchestrator.format_sources(results)
+        assert len(sources) == 1
+        assert sources[0]["url"] == "https://example.com/p"
+        assert sources[0]["title"] == ""
+        assert sources[0]["price"] is None
+        assert sources[0]["currency"] == ""
+        assert sources[0]["value_label"] == ""
+        assert sources[0]["scraped_at"] == "2026-10-04T00:00:00"
 
 
 # ---------------------------------------------------------------------------

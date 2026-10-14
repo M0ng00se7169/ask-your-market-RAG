@@ -64,7 +64,94 @@ def _result_payload(result: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Source extraction from tool results
+# Public source formatting (UI-facing)
+# ---------------------------------------------------------------------------
+
+
+def format_sources(
+    tool_results: list[dict[str, Any]],
+    *,
+    include_value_label: bool = True,
+    include_score: bool = True,
+) -> list[dict[str, Any]]:
+    """Turn tool results into a flat sources list for the UI "Sources" block.
+
+    This is the canonical, reusable path for source attribution. The orchestrator
+    uses it internally, and the UI/eval can call it directly on dispatched tool
+    results when they need the sources block independently of the answer text.
+
+    Each source dict contains at least:
+        url, title, scraped_at, price, currency, in_stock, promo, rating,
+        value_label
+    If `include_score` is True and a result carries a similarity score (e.g. from
+    search_descriptions), the score is included as ``score``.
+
+    Results are de-duplicated by (url, scraped_at) and preserve the order of first
+    appearance across the tool results.
+    """
+    sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # Source-bearing question types.
+    recognized = {
+        "price_changes", "out_of_stock", "most_expensive",
+        "least_expensive", "current_product", "product_history",
+        "search_descriptions",
+    }
+
+    for result in tool_results:
+        kind = result.get("question_type")
+        if kind not in recognized:
+            continue
+
+        payload = result.get("result")
+        if not isinstance(payload, list):
+            continue
+
+        # Top-level score from the tool result (e.g. when search_descriptions
+        # result is wrapped with a score at the result level).
+        result_score = result.get("score")
+
+        for row in payload:
+            url = row.get("url", "")
+            key = _source_key(url, row)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            # Score preference: row-level score (from search_descriptions records)
+            # takes precedence over result-level score.
+            row_score = row.get("score")
+            effective_score = row_score if row_score is not None else result_score
+
+            entry = _source_entry(url, row)
+            if include_score and effective_score is not None:
+                entry["score"] = effective_score
+            sources.append(entry)
+
+    return sources
+
+
+def format_sources_for_ui(
+    tool_results: list[dict[str, Any]],
+    *,
+    show_scores: bool = False,
+) -> list[dict[str, Any]]:
+    """Convenience wrapper tuned for the Gradio Sources block.
+
+    Returns sources with the fields the UI card/row expects:
+    url, title, scraped_at, value_label, price, currency, in_stock, promo, rating,
+    and optionally score.
+    """
+    return format_sources(
+        tool_results,
+        include_value_label=True,
+        include_score=show_scores,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Source extraction from tool results (internal, used by format_sources)
 # ---------------------------------------------------------------------------
 
 
@@ -74,45 +161,7 @@ def _sources_from_tool_results(tool_results: list[dict[str, Any]]) -> list[dict[
     This is the canonical source attribution path: sources come from tool
     results, not from the LLM's memory.
     """
-    sources: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    for result in tool_results:
-        kind = result.get("question_type")
-        payload = result.get("result")
-
-        if kind == "product_history" and isinstance(payload, list):
-            url = result.get("url", "")
-            for row in payload:
-                key = _source_key(url, row)
-                if key in seen:
-                    continue
-                seen.add(key)
-                sources.append(_source_entry(url, row))
-
-        elif kind == "current_product" and isinstance(payload, list):
-            for row in payload:
-                url = row.get("url", result.get("url", ""))
-                key = _source_key(url, row)
-                if key in seen:
-                    continue
-                seen.add(key)
-                sources.append(_source_entry(url, row))
-
-        elif isinstance(payload, list):
-            # price_changes / out_of_stock / most_expensive / least_expensive / current_product
-            recognized = {"price_changes", "out_of_stock", "most_expensive", "least_expensive", "current_product", "product_history"}
-            if kind not in recognized:
-                continue
-            for row in payload:
-                url = row.get("url", "")
-                key = _source_key(url, row)
-                if key in seen:
-                    continue
-                seen.add(key)
-                sources.append(_source_entry(url, row))
-
-    return sources
+    return format_sources(tool_results)
 
 
 def _source_key(url: str, row: dict[str, Any]) -> str:
@@ -123,12 +172,12 @@ def _source_key(url: str, row: dict[str, Any]) -> str:
 def _source_entry(url: str, row: dict[str, Any]) -> dict[str, Any]:
     return {
         "url": url or "",
-        "title": row.get("title", ""),
-        "scraped_at": row.get("scraped_at", ""),
+        "title": row.get("title", "") or "",
+        "scraped_at": row.get("scraped_at", "") or "",
         "price": row.get("price"),
-        "currency": row.get("currency", ""),
+        "currency": row.get("currency", "") or "",
         "in_stock": row.get("in_stock"),
-        "promo": row.get("promo", ""),
+        "promo": row.get("promo", "") or "",
         "rating": row.get("rating"),
         "value_label": _value_label(row),
     }
@@ -147,7 +196,7 @@ def _value_label(row: dict[str, Any]) -> str:
         parts.append(f"{currency} {price:g}")
     if in_stock is False:
         parts.append("out of stock")
-    elif in_stock is True and not row.get("promo"):
+    elif in_stock is True:
         parts.append("in stock")
     if promo:
         parts.append(f"promo: {promo}")
@@ -336,7 +385,7 @@ def answer(
 
     refusal = _is_refusal(answer_text)
 
-    sources = _sources_from_tool_results(tool_results) if tool_results else []
+    sources = format_sources(tool_results, include_score=True) if tool_results else []
 
     return OrchestratorResult(
         answer=answer_text,
