@@ -1,0 +1,21 @@
+# Ask Your Market — Python dependencies
+#
+# Core data + vector DB
+pandas>=2.2
+chromadb>=0.6
+
+# Local embeddings
+sentence-transformers>=3.0
+torch>=2.4
+
+# LLM client (OpenRouter is OpenAI-compatible)
+openai>=1.0
+
+# Chat UI + deployment
+gradio>=4.0
+
+# Eval baseline (BM25)
+rank-bm25>=0.2
+
+# Env + dev
+python-dotenv>=1.0

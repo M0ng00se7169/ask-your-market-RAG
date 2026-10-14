@@ -1,0 +1,585 @@
+{
+  "name": "Competitor Monitoring (n8n + LLM + Telegram)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup (5 steps)\n1. Create a Google Sheet with a `snapshots` tab and headers:\n`scraped_at | url | title | price | currency | in_stock | promo | rating | reviews_count`\n2. Paste the Sheet ID into **Read snapshots** and **Append snapshots**.\n3. Connect credentials: Google Sheets, Telegram, and OpenRouter (Header Auth: name `Authorization`, value `Bearer <key>`).\n4. Edit **Config**: `telegram_chat_id`, `llm_model` (OpenRouter model id), `send_if_no_changes`.\n5. Import `error-workflow.json` and select it in Settings → Error workflow.\n\nDemo source: books.toscrape.com (public scraping sandbox).",
+        "height": 300,
+        "width": 520
+      },
+      "id": "7af73052-f158-5bd3-b598-82d17a0933e1",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -330
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "97b097fe-f9b0-561d-95f5-8c435e35511d",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "d3178ef3-50e3-5a74-a905-0d7151ed655f",
+      "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ddb4083d-9d08-550e-b196-6dbc82be49e3",
+              "name": "telegram_chat_id",
+              "value": "YOUR_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "940aae78-5ae7-5539-81e6-bfe60bd82993",
+              "name": "llm_model",
+              "value": "YOUR_MODEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "8c1a76e3-0cc1-5b24-8f88-5f765c49f95b",
+              "name": "send_if_no_changes",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "72e9d35e-3bf6-5c55-ab93-8c43f691f5fa",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Demo source: public scraping sandbox (books.toscrape.com).\n// For a real client: replace with their product URLs (or read them from a sheet).\nconst base = 'https://books.toscrape.com/catalogue/';\nconst slugs = [\n  'a-light-in-the-attic_1000',\n  'tipping-the-velvet_999',\n  'soumission_998',\n  'sharp-objects_997',\n  'sapiens-a-brief-history-of-humankind_996',\n  'the-requiem-red_995',\n  'the-dirty-little-secrets-of-getting-your-dream-job_994',\n  'the-coming-woman-a-novel-based-on-the-life-of-the-infamous-feminist-victoria-woodhull_993',\n  'the-boys-in-the-boat-nine-americans-and-their-epic-quest-for-gold-at-the-1936-berlin-olympics_992',\n  'the-black-maria_991',\n  'starving-hearts-triangular-trade-trilogy-1_990',\n  'shakespeares-sonnets_989',\n  'set-me-free_988',\n  'scott-pilgrims-precious-little-life-scott-pilgrim-1_987',\n  'rip-it-up-and-start-again_986',\n  'our-band-could-be-your-life-scenes-from-the-american-indie-underground-1981-1991_985',\n  'olio_984',\n  'mesaerion-the-best-science-fiction-stories-1800-1849_983',\n  'libertarianism-for-beginners_982',\n  'its-only-the-himalayas_981'\n];\nreturn slugs.map(s => ({ json: { url: base + s + '/index.html' } }));\n"
+      },
+      "id": "cd50c82a-56df-574e-a1b7-8d077bb1b641",
+      "name": "URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "portfolio-monitor-bot/1.0 (demo project)"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "af18b6bf-9e78-5323-90f3-da39afa89b6e",
+      "name": "Fetch page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        90
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "sourceData": "json",
+        "dataPropertyName": "data",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "raw_text",
+              "cssSelector": ".product_main",
+              "returnValue": "text"
+            },
+            {
+              "key": "rating_class",
+              "cssSelector": "p.star-rating",
+              "returnValue": "attribute",
+              "attribute": "class"
+            },
+            {
+              "key": "info_table",
+              "cssSelector": "table.table-striped",
+              "returnValue": "text"
+            }
+          ]
+        },
+        "options": {
+          "trimValues": true,
+          "cleanUpText": true
+        }
+      },
+      "id": "bdec059e-3e4f-5c70-bf87-a89e37826356",
+      "name": "Extract HTML",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds one LLM request per successfully scraped page.\n// Index mapping to \"URLs\" is safe: Fetch/Extract nodes output exactly one item per input item.\nconst urls = $('URLs').all();\nconst model = $('Config').first().json.llm_model;\n\nconst system = [\n  'You extract product data from the raw text of a web page.',\n  'Return only a single JSON object. No markdown, no explanations.',\n  'Keys (all required): title (string), price (number), currency (string), in_stock (boolean), promo (string or null), rating (number or null), reviews_count (integer or null).',\n  'Rules:',\n  '- price: number without currency symbol, decimal point.',\n  '- currency: ISO code (EUR, USD, GBP), inferred from the symbol.',\n  '- in_stock: true if the text says the item is available, otherwise false.',\n  '- rating: number from 1 to 5. Map a CSS class such as \"star-rating Three\" to 3.',\n  '- reviews_count: integer if present, otherwise null.',\n  '- promo: text of any discount or promotion, otherwise null.',\n  '- If a field is not present in the text, return null. Do not invent values.'\n].join('\\n');\n\nconst out = [];\n$input.all().forEach((it, i) => {\n  const j = it.json;\n  if (j.error || !j.raw_text) return; // scrape failed: counted later as \"failed\"\n  const parts = [j.raw_text];\n  if (j.info_table) parts.push('Product information: ' + j.info_table);\n  if (j.rating_class) parts.push('Rating CSS class: ' + j.rating_class);\n  const text = parts.join('\\n').slice(0, 6000);\n  out.push({\n    json: {\n      url: urls[i].json.url,\n      body: {\n        model,\n        temperature: 0,\n        messages: [\n          { role: 'system', content: system },\n          { role: 'user', content: 'Page text:\\n' + text }\n        ],\n        response_format: { type: 'json_object' }\n      }\n    }\n  });\n});\n\nif (out.length === 0) {\n  throw new Error('All page fetches failed: nothing to process');\n}\nreturn out;\n"
+      },
+      "id": "8c79571f-2a62-5232-b950-9d54d6a94c85",
+      "name": "Build LLM request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 3000
+            }
+          }
+        }
+      },
+      "id": "8c4382a2-c926-55fe-9762-010efeefbeed",
+      "name": "LLM extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        90
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "OpenRouter Header Auth"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parses the LLM answer and validates it. Invalid items are flagged, not dropped silently.\nconst built = $('Build LLM request').all();\nconst out = [];\n\n$input.all().forEach((it, i) => {\n  const url = built[i].json.url;\n  const errors = [];\n  let item = {};\n\n  try {\n    const raw = it.json.choices[0].message.content;\n    // some models wrap JSON in a markdown fence: strip it before parsing\n    item = JSON.parse(raw.replace(/```json|```/g, '').trim());\n    // free models sometimes return numbers/booleans as strings: coerce\n    if (typeof item.price === 'string') item.price = parseFloat(item.price.replace(',', '.'));\n    if (typeof item.in_stock === 'string') item.in_stock = item.in_stock.toLowerCase() === 'true';\n    if (typeof item.rating === 'string') item.rating = parseFloat(item.rating) || null;\n    if (typeof item.currency === 'string') item.currency = item.currency.trim().toUpperCase();\n  } catch (e) {\n    errors.push('llm_response');\n  }\n\n  if (typeof item.title !== 'string' || !item.title) errors.push('title');\n  if (typeof item.price !== 'number' || !(item.price > 0)) errors.push('price');\n  if (typeof item.in_stock !== 'boolean') errors.push('in_stock');\n  if (typeof item.currency !== 'string' || item.currency.length !== 3) errors.push('currency');\n\n  const usage = it.json.usage || {};\n  out.push({\n    json: {\n      url,\n      ...item,\n      scraped_at: new Date().toISOString(),\n      valid: errors.length === 0,\n      errors,\n      prompt_tokens: usage.prompt_tokens || 0,\n      completion_tokens: usage.completion_tokens || 0\n    }\n  });\n});\n\nreturn out;\n"
+      },
+      "id": "05f874be-0605-56f7-8fe3-3716164295ee",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "snapshots",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "f08eb9e0-08a4-5643-8d09-127aa5b3119a",
+      "name": "Read snapshots",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        380
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compares fresh snapshots with the last stored snapshot per URL.\nconst current = $('Validate').all().map(i => i.json);\nconst valid = current.filter(i => i.valid);\nconst totalUrls = $('URLs').all().length;\n\nif (valid.length === 0) {\n  throw new Error('No valid products extracted: check scraping selectors and LLM step');\n}\n\n// Google Sheets returns everything as strings, so cast explicitly.\nconst history = $('Read snapshots').all()\n  .map(i => i.json)\n  .filter(r => r.url)\n  .sort((a, b) => String(a.scraped_at).localeCompare(String(b.scraped_at)));\n\nconst last = {};\nfor (const r of history) last[r.url] = r; // chronological: latest row wins\n\nconst toBool = v => String(v).toLowerCase() === 'true';\nconst today = new Date().toISOString().slice(0, 10);\n\nconst changes = [];\nconst rows = [];\n\nfor (const c of valid) {\n  const p = last[c.url];\n  let skip = false;\n\n  if (p) {\n    const oldPrice = Number(p.price);\n    const oldStock = toBool(p.in_stock);\n    const oldPromo = p.promo || null;\n    const oldRating = p.rating === '' || p.rating == null ? null : Number(p.rating);\n    const newPromo = c.promo || null;\n\n    if (c.price !== oldPrice) {\n      changes.push({ type: 'price', title: c.title, url: c.url, from: oldPrice, to: c.price, currency: c.currency });\n    }\n    if (c.in_stock !== oldStock) {\n      changes.push({ type: 'stock', title: c.title, url: c.url, from: oldStock, to: c.in_stock });\n    }\n    if (newPromo !== oldPromo) {\n      changes.push({ type: 'promo', title: c.title, url: c.url, from: oldPromo, to: newPromo });\n    }\n    if (oldRating !== null && c.rating != null && oldRating - c.rating >= 0.3) {\n      changes.push({ type: 'rating', title: c.title, url: c.url, from: oldRating, to: c.rating });\n    }\n\n    // Deduplication: same day + nothing changed => do not write another row.\n    const sameDay = String(p.scraped_at).slice(0, 10) === today;\n    const unchanged = c.price === oldPrice && c.in_stock === oldStock && newPromo === oldPromo;\n    skip = sameDay && unchanged;\n  }\n\n  rows.push({\n    skip,\n    row: {\n      scraped_at: c.scraped_at,\n      url: c.url,\n      title: c.title,\n      price: c.price,\n      currency: c.currency,\n      in_stock: String(c.in_stock),\n      promo: c.promo || '',\n      rating: c.rating == null ? '' : c.rating,\n      reviews_count: c.reviews_count == null ? '' : c.reviews_count\n    }\n  });\n}\n\nreturn [{\n  json: {\n    changes,\n    rows,\n    isFirstRun: Object.keys(last).length === 0,\n    total_urls: totalUrls,\n    valid_count: valid.length,\n    failed_count: totalUrls - valid.length,\n    prompt_tokens: current.reduce((s, i) => s + (i.prompt_tokens || 0), 0),\n    completion_tokens: current.reduce((s, i) => s + (i.completion_tokens || 0), 0)\n  }\n}];\n"
+      },
+      "id": "efac6e58-5764-5f1a-b52f-8159de33684d",
+      "name": "Diff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turns the \"rows\" array into separate items for the Google Sheets append node.\nreturn $json.rows.filter(r => !r.skip).map(r => ({ json: r.row }));\n"
+      },
+      "id": "abc3a463-17c9-5f5e-a07d-5152a1b925c8",
+      "name": "Prepare rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "snapshots",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "0d1919c0-8fbe-5f3c-8c9f-723d642163fb",
+      "name": "Append snapshots",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1440,
+        470
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formats the Telegram digest (HTML parse mode).\nconst d = $json;\nconst cfg = $('Config').first().json;\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst date = new Date().toISOString().slice(0, 10);\nconst by = t => d.changes.filter(c => c.type === t);\n\nconst lines = [\n  '📊 <b>Competitor monitoring, ' + date + '</b>',\n  'Checked: ' + d.valid_count + ' of ' + d.total_urls + ', changes: ' + d.changes.length\n];\n\nif (d.isFirstRun) {\n  lines.push('ℹ️ First run: baseline saved, nothing to compare yet.');\n}\n\nconst prices = by('price');\nif (prices.length) {\n  lines.push('', '💰 <b>Price</b>');\n  for (const c of prices) {\n    const pct = c.from ? ((c.to - c.from) / c.from * 100).toFixed(1) : '0.0';\n    const sign = c.to > c.from ? '+' : '';\n    lines.push('• ' + esc(c.title) + ': ' + c.from + ' → ' + c.to + ' ' + esc(c.currency) + ' (' + sign + pct + '%)');\n    lines.push('  ' + esc(c.url));\n  }\n}\n\nconst stock = by('stock');\nif (stock.length) {\n  lines.push('', '📦 <b>Availability</b>');\n  for (const c of stock) {\n    lines.push('• ' + esc(c.title) + ': ' + (c.to ? 'back in stock' : 'out of stock'));\n    lines.push('  ' + esc(c.url));\n  }\n}\n\nconst promo = by('promo');\nif (promo.length) {\n  lines.push('', '🏷 <b>Promo</b>');\n  for (const c of promo) {\n    lines.push('• ' + esc(c.title) + ': ' + esc(c.from || 'none') + ' → ' + esc(c.to || 'none'));\n    lines.push('  ' + esc(c.url));\n  }\n}\n\nconst rating = by('rating');\nif (rating.length) {\n  lines.push('', '⭐ <b>Rating drop</b>');\n  for (const c of rating) {\n    lines.push('• ' + esc(c.title) + ': ' + c.from + ' → ' + c.to);\n    lines.push('  ' + esc(c.url));\n  }\n}\n\nif (d.failed_count > 0) {\n  lines.push('', '⚠️ Could not process: ' + d.failed_count);\n}\n\nlines.push('', '🧮 LLM tokens: ' + d.prompt_tokens + ' in / ' + d.completion_tokens + ' out');\n\nconst shouldSend = d.changes.length > 0 || d.failed_count > 0 || cfg.send_if_no_changes === true;\nreturn [{ json: { text: lines.join('\\n'), chat_id: cfg.telegram_chat_id, should_send: shouldSend } }];\n"
+      },
+      "id": "e065d904-75b2-575c-9e74-38519213f471",
+      "name": "Format digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "898d4c71-3b01-52af-ad76-58907396c1b9",
+              "leftValue": "={{ $json.should_send }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7cf4c387-76e2-5c6b-9e17-18fe84c484f2",
+      "name": "Send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "0843c323-2a82-55ac-b983-2814524d57a1",
+      "name": "Telegram digest",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        270
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 09:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URLs": {
+      "main": [
+        [
+          {
+            "node": "Fetch page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch page": {
+      "main": [
+        [
+          {
+            "node": "Extract HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract HTML": {
+      "main": [
+        [
+          {
+            "node": "Build LLM request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM request": {
+      "main": [
+        [
+          {
+            "node": "LLM extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM extract": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Read snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read snapshots": {
+      "main": [
+        [
+          {
+            "node": "Diff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff": {
+      "main": [
+        [
+          {
+            "node": "Format digest",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare rows": {
+      "main": [
+        [
+          {
+            "node": "Append snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format digest": {
+      "main": [
+        [
+          {
+            "node": "Send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send?": {
+      "main": [
+        [
+          {
+            "node": "Telegram digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

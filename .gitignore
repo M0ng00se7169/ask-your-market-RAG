@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Vector index (rebuilt from CSV, not committed)
+chroma_db/
+
+# Data note: snapshots.csv is the demo data and IS committed.
+# Private client data should never be committed.
+*.private.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio
+.gradio/
+
+# Eval outputs (regenerated each run)
+eval/results.json
