@@ -1,0 +1,358 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ask Your Market — evaluation question set",
+  "description": "25 questions for Phase 5 eval: 10 exact, 8 semantic, 4 mixed, 3 out-of-scope. References are computed from the synthetic snapshots.csv (fixed seed) so scoring is objective for the exact category.",
+  "questions": [
+    {
+      "id": "exact-01",
+      "type": "exact",
+      "question": "Which products got cheaper in the last 7 days?",
+      "expected": {
+        "question_type": "price_changes",
+        "params": { "days": 7 },
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+          "note": "Product A has a planned price drop on day 12; within 7 days of the latest snapshot it should appear as a price change."
+        }
+      }
+    },
+    {
+      "id": "exact-02",
+      "type": "exact",
+      "question": "What is the price of A Light in the Attic right now?",
+      "expected": {
+        "question_type": "current_product",
+        "params": { "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html" },
+        "check": {
+          "kind": "latest_snapshot_lookup",
+          "assert": "price_eq",
+          "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+          "field": "price",
+          "note": "Latest snapshot price for product A after the planned drop."
+        }
+      }
+    },
+    {
+      "id": "exact-03",
+      "type": "exact",
+      "question": "How did the price of Tipping the Velvet change over its history?",
+      "expected": {
+        "question_type": "product_history",
+        "params": { "url": "https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html" },
+        "check": {
+          "kind": "product_history",
+          "assert": "contains_date_and_price",
+          "url": "https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html",
+          "note": "Return the time series for product B; the eval script verifies the shape and that a later snapshot exists."
+        }
+      }
+    },
+    {
+      "id": "exact-04",
+      "type": "exact",
+      "question": "Which products are currently out of stock?",
+      "expected": {
+        "question_type": "out_of_stock",
+        "params": {},
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "call_made",
+          "note": "This question is out of scope for a checkable OOS answer in the current synthetic data because the planned stockout for Tipping the Velvet recovers before the latest snapshot. The eval records whether the orchestrator called query_snapshots with question_type=out_of_stock; a checkable OOS example should use a dataset generated with a stockout that is still active on the latest day."
+        }
+      }
+    },
+    {
+      "id": "exact-05",
+      "type": "exact",
+      "question": "What is the most expensive product and is it in stock?",
+      "expected": {
+        "question_type": "most_expensive",
+        "params": { "n": 1 },
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "top_price_and_stock",
+          "note": "Returns the single most expensive latest snapshot; eval verifies price is the max and in_stock is present."
+        }
+      }
+    },
+    {
+      "id": "exact-06",
+      "type": "exact",
+      "question": "What is the cheapest product right now?",
+      "expected": {
+        "question_type": "least_expensive",
+        "params": { "n": 1 },
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "top_price_and_stock",
+          "note": "Returns the single least expensive latest snapshot; eval verifies price is the min."
+        }
+      }
+    },
+    {
+      "id": "exact-07",
+      "type": "exact",
+      "question": "Which products changed price in the last 14 days?",
+      "expected": {
+        "question_type": "price_changes",
+        "params": { "days": 14 },
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+          "note": "Wider window still captures product A's planned drop."
+        }
+      }
+    },
+    {
+      "id": "exact-08",
+      "type": "exact",
+      "question": "Give me the 3 most expensive products.",
+      "expected": {
+        "question_type": "most_expensive",
+        "params": { "n": 3 },
+        "check": {
+          "kind": "snapshot_query",
+          "assert": "count_and_ordered",
+          "n": 3,
+          "note": "Returns up to 3 products ordered by current price descending."
+        }
+      }
+    },
+    {
+      "id": "exact-09",
+      "type": "exact",
+      "question": "What data do you have available?",
+      "expected": {
+        "question_type": "available_data",
+        "params": {},
+        "check": {
+          "kind": "data_summary",
+          "assert": "contains_columns",
+          "columns": ["scraped_at", "url", "title", "price", "currency", "in_stock", "promo", "rating", "reviews_count", "description"],
+          "note": "The assistant should return the data summary descriptor."
+        }
+      }
+    },
+    {
+      "id": "exact-10",
+      "type": "exact",
+      "question": "Look up Starving Hearts (Triangular Trade Trilogy, Book 1) by URL.",
+      "expected": {
+        "question_type": "current_product",
+        "params": { "url": "https://books.toscrape.com/catalogue/starving-hearts-triangular-trade-trilogy-1_990/index.html" },
+        "check": {
+          "kind": "latest_snapshot_lookup",
+          "assert": "price_eq",
+          "url": "https://books.toscrape.com/catalogue/starving-hearts-triangular-trade-trilogy-1_990/index.html",
+          "field": "price",
+          "note": "Latest snapshot for product 10 (the planned promo product)."
+        }
+      }
+    },
+    {
+      "id": "semantic-01",
+      "type": "semantic",
+      "question": "Do you have any vegetarian cookbooks?",
+      "expected": {
+        "query": "vegetarian cookbook for busy weeknights",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "none_in_top_k",
+          "note": "The current catalog has no vegetarian cookbook description, so the correct semantic behavior is to return no strongly matching product. If a vegetarian cookbook is added to the catalog later, update this question to assert contains_url on that product."
+        }
+      }
+    },
+    {
+      "id": "semantic-02",
+      "type": "semantic",
+      "question": "Which products are similar to mystery novels?",
+      "expected": {
+        "query": "mystery novel set in Victorian London with a detective",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html",
+          "note": "Tipping the Velvet is the closest mystery-adjacent description in the catalog."
+        }
+      }
+    },
+    {
+      "id": "semantic-03",
+      "type": "semantic",
+      "question": "What science fiction do you have?",
+      "expected": {
+        "query": "science fiction short story collection about space travel and distant galaxies",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/mesaerion-the-best-science-fiction-stories-1800-1849_983/index.html",
+          "note": "Mesaeiron is the closest science-fiction description in the catalog."
+        }
+      }
+    },
+    {
+      "id": "semantic-04",
+      "type": "semantic",
+      "question": "Recommend a book for someone who likes psychological thrillers.",
+      "expected": {
+        "query": "dark psychological thriller about a reporter returning to her hometown",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/sharp-objects_997/index.html",
+          "note": "Sharp Objects is the planned psychological-thriller match."
+        }
+      }
+    },
+    {
+      "id": "semantic-05",
+      "type": "semantic",
+      "question": "Do you have any books about human history?",
+      "expected": {
+        "query": "sweeping account of human history from the Stone Age to the present",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/sapiens-a-brief-history-of-humankind_996/index.html",
+          "note": "Sapiens is the planned history match."
+        }
+      }
+    },
+    {
+      "id": "semantic-06",
+      "type": "semantic",
+      "question": "I want a book with playful drawings and verse for children.",
+      "expected": {
+        "query": "illustrated collection of poems reflecting on childhood with drawings and verse",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+          "note": "A Light in the Attic is the planned playful-verse match."
+        }
+      }
+    },
+    {
+      "id": "semantic-07",
+      "type": "semantic",
+      "question": "Which products are like oral histories of music scenes?",
+      "expected": {
+        "query": "oral history of the American indie record scene of the 1980s",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/our-band-could-be-your-life-scenes-from-the-american-indie-underground-1981-1991_985/index.html",
+          "note": "Our Band Could Be Your Life is the planned music-oral-history match."
+        }
+      }
+    },
+    {
+      "id": "semantic-08",
+      "type": "semantic",
+      "question": "Find books about political upheaval and academic life.",
+      "expected": {
+        "query": "provocative contemporary French novel about academic life and political upheaval",
+        "top_k": 5,
+        "check": {
+          "kind": "semantic_search",
+          "assert": "contains_url",
+          "url": "https://books.toscrape.com/catalogue/soumission_998/index.html",
+          "note": "Soumission is the planned academic-political match."
+        }
+      }
+    },
+    {
+      "id": "mixed-01",
+      "type": "mixed",
+      "question": "Which vegetarian cookbook do you have and what is its price?",
+      "expected": {
+        "tools": ["search_descriptions", "query_snapshots"],
+        "check": {
+          "kind": "mixed",
+          "semantic_query": "vegetarian cookbook for busy weeknights",
+          "note": "Requires semantic search for a vegetarian cookbook, then a current_product lookup for its price. The current catalog has no vegetarian cookbook, so this mixed question is a placeholder; it becomes checkable once a vegetarian cookbook description is added to the catalog."
+        }
+      }
+    },
+    {
+      "id": "mixed-02",
+      "type": "mixed",
+      "question": "What is the most expensive product and is it similar to any history books?",
+      "expected": {
+        "tools": ["query_snapshots", "search_descriptions"],
+        "check": {
+          "kind": "mixed",
+          "snapshot_question_type": "most_expensive",
+          "semantic_query": "sweeping account of human history from the Stone Age to the present",
+          "note": "Requires most_expensive first, then a semantic comparison against history books."
+        }
+      }
+    },
+    {
+      "id": "mixed-03",
+      "type": "mixed",
+      "question": "Which products dropped price recently and are any of them cookbooks?",
+      "expected": {
+        "tools": ["query_snapshots", "search_descriptions"],
+        "check": {
+          "kind": "mixed",
+          "snapshot_question_type": "price_changes",
+          "snapshot_params": { "days": 7 },
+          "semantic_query": "practical cookbook with vegetarian recipes for busy weeknights",
+          "note": "Requires price_changes first, then semantic search to identify any cookbook among the changed products."
+        }
+      }
+    },
+    {
+      "id": "mixed-04",
+      "type": "mixed",
+      "question": "What is the cheapest product and do you have anything similar to it?",
+      "expected": {
+        "tools": ["query_snapshots", "search_descriptions"],
+        "check": {
+          "kind": "mixed",
+          "snapshot_question_type": "least_expensive",
+          "semantic_query": "science fiction short story collection about space travel and distant galaxies",
+          "note": "Requires least_expensive first, then a semantic search for a similar product."
+        }
+      }
+    },
+    {
+      "id": "outofscope-01",
+      "type": "out_of_scope",
+      "question": "What was the total revenue last week?",
+      "expected": {
+        "assert": "refusal",
+        "note": "Revenue is not tracked in the data."
+      }
+    },
+    {
+      "id": "outofscope-02",
+      "type": "out_of_scope",
+      "question": "How many units of each product were sold?",
+      "expected": {
+        "assert": "refusal",
+        "note": "Sales volume is not tracked in the data."
+      }
+    },
+    {
+      "id": "outofscope-03",
+      "type": "out_of_scope",
+      "question": "What will the price of A Light in the Attic be next month?",
+      "expected": {
+        "assert": "refusal",
+        "note": "Future prices / forecasts are not in the data."
+      }
+    }
+  ]
+}
