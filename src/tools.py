@@ -175,6 +175,9 @@ def _required_for_tool(name: str) -> list[str]:
     return []
 
 
+_KNOWN_TOOLS = {"query_snapshots", "search_descriptions", "get_data_summary"}
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -363,15 +366,32 @@ def clear_collection() -> None:
 def _resolve_collection() -> Any:
     if _collection_singleton is not None:
         return _collection_singleton
-    raise RuntimeError("No Chroma collection set. Call set_collection() before search_descriptions.")
+    raise RuntimeError("No Chroma collection set. Call set_collection() before search_descriptions.")# Optional stash used by the orchestrator/tests so search_descriptions can run
+# without a real Chroma singleton in unit-test contexts.
+_stashed_collection_for_tests: Any = None
+
+
+def _stash_collection_for_tests(collection: Any) -> None:
+    global _stashed_collection_for_tests
+    _stashed_collection_for_tests = collection
+
+
+def _unstash_collection_for_tests() -> None:
+    global _stashed_collection_for_tests
+    _stashed_collection_for_tests = None
+
+
+def _resolve_collection_with_stash() -> Any:
+    if _stashed_collection_for_tests is not None:
+        return _stashed_collection_for_tests
+    return _resolve_collection()
 
 
 # Monkey-patch the search path used by run_search_descriptions so the default
 # collection comes from the singleton instead of requiring it as an arg every time.
 # We keep the explicit collection= param for tests; the runtime path uses the singleton.
 def _search_with_default(query: str, top_k: int | None = None) -> dict[str, Any]:
-    return run_search_descriptions(query, top_k, collection=_resolve_collection())
-
+    return run_search_descriptions(query, top_k, collection=_resolve_collection_with_stash())
 
 # Expose a convenience that the orchestrator/runtime uses.
 search_descriptions_tool = _search_with_default
@@ -450,6 +470,7 @@ def run_tool(
         return run_search_descriptions(
             query=args.get("query", ""),
             top_k=args.get("top_k"),
+            collection=_resolve_collection_with_stash(),
         )
     if name == "get_data_summary":
         return run_get_data_summary(
