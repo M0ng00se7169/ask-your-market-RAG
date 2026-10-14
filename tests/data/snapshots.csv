@@ -1,0 +1,7 @@
+scraped_at,url,title,price,currency,in_stock,promo,rating,reviews_count,description
+2026-10-01T00:00:00,https://books.toscrape.com/a,A,20.0,GBP,True,,4.2,10,A desc
+2026-10-02T00:00:00,https://books.toscrape.com/a,A,20.0,GBP,True,,4.2,10,A desc
+2026-10-03T00:00:00,https://books.toscrape.com/a,A,16.0,GBP,True,,4.2,10,A desc
+2026-10-03T00:00:00,https://books.toscrape.com/b,B,10.0,GBP,True,Summer sale,4.5,25,B desc
+2026-10-04T00:00:00,https://books.toscrape.com/b,B,10.0,GBP,False,,4.5,25,B desc
+2026-10-03T00:00:00,https://books.toscrape.com/c,C,30.0,GBP,True,,3.8,5,C desc
