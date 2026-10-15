@@ -21,7 +21,18 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import httpcore
 import src.llm as llm
+
+
+class _WrappedProtocolError(Exception):
+    """Simulates an exception chain where a transient httpcore protocol error is
+    wrapped by another layer (e.g. the openai SDK wrapping it as an
+    APIConnectionError)."""
+
+    def __init__(self, inner: BaseException) -> None:
+        super().__init__(str(inner))
+        self.__cause__ = inner
 
 
 @pytest.fixture(autouse=True)
@@ -60,12 +71,12 @@ class TestConfiguration:
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-xxx")
         monkeypatch.setenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
         with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
-            llm._get_client()
+            llm._build_client()
 
     def test_real_key_creates_client(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
         monkeypatch.setenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
-        client = llm._get_client()
+        client = llm._build_client()
         assert client is not None
         # openai normalizes base_url by appending a trailing slash.
         assert str(client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"
@@ -92,7 +103,7 @@ class TestChatCompletionParsing:
             prompt_tokens=10, completion_tokens=20, total_tokens=30
         )
 
-        with patch.object(llm, "_get_client") as mk_client:
+        with patch.object(llm, "_build_client") as mk_client:
             mk_client.return_value.chat.completions.create.return_value = fake_response
             monkeypatch = pytest.MonkeyPatch()
             monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
@@ -128,7 +139,7 @@ class TestChatCompletionParsing:
         fake_response.choices = [fake_choice]
         fake_response.usage = None
 
-        with patch.object(llm, "_get_client") as mk_client:
+        with patch.object(llm, "_build_client") as mk_client:
             mk_client.return_value.chat.completions.create.return_value = fake_response
             monkeypatch = pytest.MonkeyPatch()
             monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
@@ -150,7 +161,7 @@ class TestChatCompletionParsing:
         fake_response.choices = [fake_choice]
         fake_response.usage = None
 
-        with patch.object(llm, "_get_client") as mk_client:
+        with patch.object(llm, "_build_client") as mk_client:
             mk_client.return_value.chat.completions.create.return_value = fake_response
             monkeypatch = pytest.MonkeyPatch()
             monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
@@ -174,7 +185,7 @@ class TestChatCompletionParsing:
         fake_response.choices = [fake_choice]
         fake_response.usage = None
 
-        with patch.object(llm, "_get_client") as mk_client:
+        with patch.object(llm, "_build_client") as mk_client:
             mk_client.return_value.chat.completions.create.return_value = fake_response
             monkeypatch = pytest.MonkeyPatch()
             monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
@@ -191,11 +202,59 @@ class TestChatCompletionErrorPath:
         monkeypatch.setenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
         mk_client = MagicMock()
         mk_client.chat.completions.create.side_effect = RuntimeError("boom")
-        with patch.object(llm, "_get_client", return_value=mk_client):
+        with patch.object(llm, "_build_client", return_value=mk_client):
             with caplog.at_level("ERROR"):
                 with pytest.raises(RuntimeError):
                     llm.chat_completion([{"role": "user", "content": "hi"}], tools=[])
             assert any("OpenRouter call failed" in r.message for r in caplog.records)
+
+
+class TestTransientProtocolErrorRetry:
+    """The openai SDK retries timeout/request exceptions but does NOT retry
+    httpcore.RemoteProtocolError / ProtocolError, even when they surface as
+    APIConnectionError. This app retries those at the application layer with a
+    fresh client per attempt."""
+
+    def test_remote_protocol_error_is_retried_once_then_raised(self, caplog, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-real")
+        monkeypatch.setenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
+        inner = httpcore.RemoteProtocolError("server disconnected mid-stream")
+        wrapped = _WrappedProtocolError(inner)
+
+        mk_client = MagicMock()
+        mk_client.chat.completions.create.side_effect = [wrapped, wrapped]
+
+        call_count = 0
+
+        def _building_client():
+            nonlocal call_count
+            call_count += 1
+            return mk_client
+
+        with patch.object(llm, "_build_client", side_effect=_building_client):
+            with caplog.at_level("ERROR"):
+                with pytest.raises(_WrappedProtocolError):
+                    llm.chat_completion([{"role": "user", "content": "hi"}], tools=[])
+
+        assert call_count == 2, "expected a fresh client per retry attempt"
+        assert any("RemoteProtocolError" in r.message or "mid-stream" in r.message for r in caplog.records)
+
+    def test_non_transient_errors_are_not_retried(self, caplog, monkeypatch):
+        """Auth / status / other errors should propagate immediately, not be
+        swallowed by the protocol-error retry path."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-real")
+        monkeypatch.setenv("OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free")
+
+        mk_client = MagicMock()
+        mk_client.chat.completions.create.side_effect = RuntimeError("not a protocol error")
+
+        with patch.object(llm, "_build_client", return_value=mk_client):
+            with caplog.at_level("ERROR"):
+                with pytest.raises(RuntimeError, match="not a protocol error"):
+                    llm.chat_completion([{"role": "user", "content": "hi"}], tools=[])
+
+        # The point of this test is that the call happens exactly once (no retry).
+        assert mk_client.chat.completions.create.call_count == 1
 
 
 class TestCreateChatCompletionAlias:

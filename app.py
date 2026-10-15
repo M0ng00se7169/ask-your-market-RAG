@@ -254,9 +254,9 @@ def build_app() -> gr.Blocks:
 
         def _send(message, hist):
             if not message or not message.strip():
-                return (), hist or []
+                return (), hist or [], ""
             reply, cards, status = _chat(message, hist)
-            # Build a rich tuple: (user_msg, assistant_msg_with_sources)
+            # Build assistant message with embedded Sources block.
             if cards:
                 source_lines = ["**Sources**"]
                 for card in cards:
@@ -269,8 +269,17 @@ def build_app() -> gr.Blocks:
                 assistant_msg = reply + "\n\n" + "\n".join(source_lines)
             else:
                 assistant_msg = reply
-            new_hist = list(hist or [])
-            new_hist.append([message, assistant_msg])
+            # Gradio 6.x Chatbot expects each message as a dict with 'role' and 'content'.
+            new_hist: list[dict[str, Any]] = []
+            if hist:
+                for entry in hist:
+                    if isinstance(entry, dict):
+                        new_hist.append(entry)
+                    elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        new_hist.append({"role": "user", "content": entry[0]})
+                        new_hist.append({"role": "assistant", "content": entry[1]})
+            new_hist.append({"role": "user", "content": message})
+            new_hist.append({"role": "assistant", "content": assistant_msg})
             return (), new_hist, status
 
         def _clear():
