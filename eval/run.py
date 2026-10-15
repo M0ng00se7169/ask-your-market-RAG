@@ -457,7 +457,58 @@ def score_question(
 
 
 # ---------------------------------------------------------------------------
-# Main eval runner (sub-phase 5b only)
+# BM25 baseline comparison (sub-phase 5c)
+# ---------------------------------------------------------------------------
+
+
+def run_bm25_comparison(
+    questions_path: Path = QUESTIONS_PATH,
+    snapshots_path: Path = SNAPSHOTS_PATH,
+    chroma_dir: Path = CHROMA_DIR,
+    top_k: int = 5,
+    output_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run BM25 vs embedding recall comparison (sub-phase 5c).
+
+    Builds a BM25 index over product descriptions and runs the 8 semantic
+    questions through both BM25 and the embedding-based search, recording
+    recall@top_k for both.
+
+    Returns the comparison report dict.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logger = logging.getLogger(__name__)
+
+    from eval.bm25_baseline import build_bm25_index, compare_search_methods
+
+    logger.info("Loading questions from %s", questions_path)
+    questions = load_questions(questions_path)
+    semantic_questions = [q for q in questions if q["type"] == "semantic"]
+    logger.info("Found %d semantic questions out of %d total", len(semantic_questions), len(questions))
+
+    logger.info("Building BM25 index from %s", snapshots_path)
+    bm25_index = build_bm25_index(snapshots_path)
+    logger.info("BM25 index built with %d products", bm25_index.product_count)
+
+    logger.info("Loading Chroma collection from %s", chroma_dir)
+    collection = get_collection(chroma_dir)
+    logger.info("Collection loaded with %d products", collection.count())
+
+    logger.info("Running BM25 vs embedding comparison (top_k=%d)...", top_k)
+    report = compare_search_methods(bm25_index, collection, semantic_questions, top_k=top_k)
+
+    if output_path is not None:
+        output_path.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("BM25 comparison report written to %s", output_path)
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Main eval runner (sub-phase 5b + optional 5c)
 # ---------------------------------------------------------------------------
 
 
@@ -467,8 +518,29 @@ def run_eval(
     chroma_dir: Path = CHROMA_DIR,
     output_path: Path = RESULTS_PATH,
     summary_path: Path = SUMMARY_PATH,
+    *,
+    run_bm25: bool = True,
+    top_k: int = 5,
 ) -> dict[str, Any]:
-    """Run the evaluation suite (sub-phase 5b)."""
+    """Run the evaluation suite (sub-phase 5b + optional 5c).
+
+    Parameters
+    ----------
+    questions_path : Path
+        Path to questions.json.
+    snapshots_path : Path
+        Path to snapshots.csv.
+    chroma_dir : Path
+        Path to persisted Chroma index.
+    output_path : Path
+        Where to write results.json.
+    summary_path : Path
+        Where to write results_summary.md.
+    run_bm25 : bool
+        If True, also run the BM25 baseline comparison (sub-phase 5c).
+    top_k : int
+        Top-K for BM25/embedding recall comparison.
+    """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     logger.info("Loading questions from %s", questions_path)
@@ -504,6 +576,28 @@ def run_eval(
                 "details": f"Exception: {e}",
             })
 
+    # Sub-phase 5c: optional BM25 baseline comparison
+    bm25_report = None
+    if run_bm25:
+        logger.info("Running BM25 baseline comparison (sub-phase 5c)...")
+        try:
+            bm25_report = run_bm25_comparison(
+                questions_path=questions_path,
+                snapshots_path=snapshots_path,
+                chroma_dir=chroma_dir,
+                top_k=top_k,
+            )
+            logger.info(
+                "BM25 avg recall@%d: %.4f | Embedding avg recall@%d: %.4f",
+                top_k,
+                bm25_report["bm25"]["avg_recall"],
+                top_k,
+                bm25_report["embedding"]["avg_recall"],
+            )
+        except Exception as e:
+            logger.warning("BM25 comparison failed: %s", e)
+            bm25_report = {"error": str(e)}
+
     # Compute summary stats
     summary = _compute_summary(results)
 
@@ -518,6 +612,7 @@ def run_eval(
         },
         "summary": summary,
         "results": results,
+        "bm25_comparison": bm25_report,
     }
 
     # Write results
@@ -616,6 +711,8 @@ if __name__ == "__main__":
     parser.add_argument("--chroma-dir", type=Path, default=CHROMA_DIR, help="Path to Chroma DB directory")
     parser.add_argument("--output", type=Path, default=RESULTS_PATH, help="Path for results.json output")
     parser.add_argument("--summary", type=Path, default=SUMMARY_PATH, help="Path for results_summary.md output")
+    parser.add_argument("--top-k", type=int, default=5, help="Top-K for BM25 recall computation (sub-phase 5c)")
+    parser.add_argument("--no-bm25", action="store_true", help="Skip the BM25 baseline comparison (sub-phase 5c)")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
     args = parser.parse_args()
@@ -629,6 +726,8 @@ if __name__ == "__main__":
         chroma_dir=args.chroma_dir,
         output_path=args.output,
         summary_path=args.summary,
+        run_bm25=not args.no_bm25,
+        top_k=args.top_k,
     )
 
     print(f"\nEval complete. Results: {RESULTS_PATH}")
